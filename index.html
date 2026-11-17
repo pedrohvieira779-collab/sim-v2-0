@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Guardiões do Cerrado</title>
+<style>
+  :root { --bg:#f4ead5; --card:#fffaf0; --ink:#3b2a1a; --muted:#7a6650; --acc:#c8541b; --ok:#4f7d2c; --line:#d9c7a6; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#1f1a14; --card:#2b241c; --ink:#f1e6d2; --muted:#b9a68a; --acc:#e8793f; --ok:#8fbf5a; --line:#4a3e30; } }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.45 system-ui, sans-serif; }
+  main { max-width:720px; margin:0 auto; padding:16px; }
+  h1 { margin:.2em 0; font-size:1.6rem; } h2 { margin:.3em 0; font-size:1.2rem; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px; margin:10px 0; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; }
+  button { font:inherit; color:var(--ink); background:var(--card); border:2px solid var(--line); border-radius:10px; padding:10px; cursor:pointer; text-align:left; }
+  button:hover:not(:disabled), button:focus-visible { border-color:var(--acc); outline:none; }
+  button:disabled { opacity:.45; cursor:default; }
+  .big { font-size:2.4rem; line-height:1; }
+  .muted { color:var(--muted); font-size:.9rem; }
+  .bar { height:10px; background:var(--line); border-radius:5px; overflow:hidden; margin:3px 0; }
+  .bar > i { display:block; height:100%; background:var(--ok); transition:width .3s; }
+  .bar.en > i { background:#3a7bd5; } .bar.xp > i { background:#d5a33a; }
+  .vs { display:flex; gap:10px; } .vs > .card { flex:1; margin:0; }
+  #log { max-height:180px; overflow:auto; font-size:.92rem; }
+  #log p { margin:2px 0; } #log p:first-child { font-weight:600; }
+  .fact { border-left:4px solid var(--acc); padding-left:10px; }
+</style>
+</head>
+<body>
+<main id="app"></main>
+<script>
+// ---------- Dados ----------
+const HEROES = {
+  lobo:   { name:'Lobo-guará', icon:'🐺', hp:42, en:12, atk:9,  def:4, spd:8,
+            skill:{ name:'Uivo do Entardecer', cost:5, desc:'Ataque forte (2× dano).', run:(u,e)=>hit(u,e,2) },
+            fact:'Apesar do nome, não é um lobo de verdade. Come muitas frutas, como a lobeira (fruta-do-lobo).' },
+  tamandua:{ name:'Tamanduá-bandeira', icon:'🐜', hp:55, en:10, atk:8, def:5, spd:4,
+            skill:{ name:'Abraço de Garras', cost:6, desc:'Dano 1,5× e o inimigo fica atordoado.', run:(u,e)=>{ hit(u,e,1.5); e.stun=1; log(`${e.name} ficou atordoado!`); } },
+            fact:'Não tem dentes. Usa a língua comprida e pegajosa para comer formigas e cupins.' },
+  tatu:   { name:'Tatu-canastra', icon:'🛡️', hp:50, en:10, atk:7,  def:8, spd:3,
+            skill:{ name:'Enrolar e Cavar', cost:4, desc:'Cura 40% da vida e reduz o próximo dano.', run:(u)=>{ heal(u, Math.round(u.maxHp*.4)); u.guard=1; } },
+            fact:'É a maior espécie de tatu do mundo e cava tocas enormes, usadas depois por outros animais.' },
+  seriema:{ name:'Seriema', icon:'🐦', hp:36, en:14, atk:10, def:3, spd:11,
+            skill:{ name:'Bicada Dupla', cost:5, desc:'Dois ataques seguidos.', run:(u,e)=>{ hit(u,e,1); if(e.hp>0) hit(u,e,1); } },
+            fact:'Seu canto alto é um dos sons mais marcantes do Cerrado. Caça bichos pequenos no chão.' },
+};
+
+const ZONES = [
+  { id:'vereda',  name:'Vereda dos Buritis', icon:'🌴', lvl:1, foes:['cascavel','carcara'],
+    desc:'Brejos com palmeiras de buriti. Bom lugar para começar.' },
+  { id:'campo',   name:'Campo Sujo',         icon:'🌾', lvl:3, foes:['carcara','queixada','ema'],
+    desc:'Capim alto e arbustos tortos. Os bandos são territoriais.' },
+  { id:'cerradao',name:'Cerradão',           icon:'🌳', lvl:5, foes:['queixada','onca','sucuri'],
+    desc:'A parte mais fechada do Cerrado. Predadores grandes à espreita.' },
+  { id:'chapada', name:'Chapada em Chamas',  icon:'🔥', lvl:7, boss:'queimada',
+    desc:'Uma queimada ameaça todo o bioma. Só um guardião forte pode detê-la.' },
+];
+
+const FOES = {
+  cascavel:{ name:'Cascavel',      icon:'🐍', hp:22, atk:7,  def:2, spd:6,  xp:12, poison:true,
+             fact:'Avisa que está por perto chacoalhando o guizo na ponta da cauda.' },
+  carcara: { name:'Carcará',       icon:'🦅', hp:20, atk:8,  def:2, spd:10, xp:12,
+             fact:'Ave de rapina oportunista: às vezes ronda áreas queimadas atrás de bichos que fogem do fogo.' },
+  queixada:{ name:'Queixada',      icon:'🐗', hp:34, atk:9,  def:4, spd:6,  xp:20,
+             fact:'Vive em bandos e bate os dentes fazendo barulho quando se sente ameaçada.' },
+  ema:     { name:'Ema',           icon:'🪶', hp:30, atk:8,  def:3, spd:12, xp:18,
+             fact:'É a maior ave do Brasil. Não voa, mas corre muito rápido.' },
+  onca:    { name:'Onça-pintada',  icon:'🐆', hp:50, atk:13, def:5, spd:9,  xp:40,
+             fact:'É o maior felino das Américas e tem uma das mordidas mais fortes entre os felinos.' },
+  sucuri:  { name:'Sucuri',        icon:'🐉', hp:56, atk:11, def:6, spd:4,  xp:38, poison:false,
+             fact:'Não é venenosa: mata por constrição. Vive perto da água, como nas veredas.' },
+  queimada:{ name:'Grande Queimada', icon:'🔥', hp:120, atk:14, def:6, spd:7, xp:0, burn:true,
+             fact:'Queimadas fora de controle destroem habitats. Muitas são causadas por ação humana.' },
+};
+
+const ITEMS = {
+  pequi: { name:'Pequi', icon:'🟡', desc:'Recupera 25 de vida.', use:u=>heal(u,25) },
+  baru:  { name:'Baru',  icon:'🌰', desc:'Recupera 8 de energia.', use:u=>{ u.en=Math.min(u.maxEn,u.en+8); log(`${u.name} recuperou energia.`); } },
+  buriti:{ name:'Buriti',icon:'🟤', desc:'Recupera toda a vida.', use:u=>heal(u,u.maxHp) },
+};
+
+// ---------- Estado ----------
+let S; // { hero, foe, inv, log[] }
+const $ = h => document.getElementById('app').innerHTML = h;
+const rnd = (a,b) => a + Math.floor(Math.random()*(b-a+1));
+const pct = (a,b) => Math.max(0, Math.round(100*a/b));
+function log(m){ S.log.unshift(m); S.log.length = Math.min(S.log.length, 30); }
+function heal(u,n){ const v=Math.min(n,u.maxHp-u.hp); u.hp+=v; log(`${u.name} recuperou ${v} de vida.`); }
+function hit(a,d,mult=1){
+  let dmg = Math.max(1, Math.round((a.atk*mult - d.def/2) * (0.85 + Math.random()*0.3)));
+  const crit = Math.random() < 0.1; if (crit) dmg = Math.round(dmg*1.5);
+  if (d.guard) { dmg = Math.ceil(dmg/2); d.guard = 0; }
+  d.hp = Math.max(0, d.hp - dmg);
+  log(`${a.name} causou ${dmg} de dano em ${d.name}${crit?' (crítico!)':''}.`);
+  return dmg;
+}
+
+function newGame(key){
+  const h = HEROES[key];
+  S = { hero:{ ...h, key, maxHp:h.hp, maxEn:h.en, lvl:1, xp:0, next:20, cleared:{} },
+        inv:{ pequi:3, baru:1, buriti:0 }, log:[] };
+  save(); hub();
+}
+function save(){ try { localStorage.setItem('cerrado-rpg', JSON.stringify({hero:{...S.hero, skill:undefined}, inv:S.inv})); } catch(e){} }
+function load(){
+  try { const d = JSON.parse(localStorage.getItem('cerrado-rpg')); if(!d) return false;
+    d.hero.skill = HEROES[d.hero.key].skill; S = { ...d, log:[] }; return true; } catch(e){ return false; }
+}
+
+// ---------- Telas ----------
+function title(){
+  const hasSave = (()=>{ try { return !!localStorage.getItem('cerrado-rpg'); } catch(e){ return false; } })();
+  $(`<h1>🌵 Guardiões do Cerrado</h1>
+    <p class="muted">Uma grande queimada se aproxima da Chapada. Escolha um animal, fique mais forte nas regiões do Cerrado e salve o bioma.</p>
+    ${hasSave ? `<button onclick="load()&&hub()">▶ Continuar jogo salvo</button>` : ''}
+    <h2>Escolha seu guardião</h2>
+    <div class="grid">${Object.entries(HEROES).map(([k,h])=>`
+      <button onclick="newGame('${k}')">
+        <div class="big">${h.icon}</div><b>${h.name}</b>
+        <div class="muted">❤️ ${h.hp} ⚡ ${h.en} ⚔️ ${h.atk} 🛡️ ${h.def} 💨 ${h.spd}</div>
+        <div class="muted"><b>${h.skill.name}:</b> ${h.skill.desc}</div>
+      </button>`).join('')}</div>`);
+}
+
+function statsCard(u){
+  return `<div class="card"><div class="big">${u.icon}</div><b>${u.name}</b> ${u.lvl?`<span class="muted">nível ${u.lvl}</span>`:''}
+    <div class="muted">❤️ ${u.hp}/${u.maxHp}</div><div class="bar"><i style="width:${pct(u.hp,u.maxHp)}%"></i></div>
+    ${u.maxEn!==undefined?`<div class="muted">⚡ ${u.en}/${u.maxEn}</div><div class="bar en"><i style="width:${pct(u.en,u.maxEn)}%"></i></div>`:''}
+    ${u.next?`<div class="muted">✨ XP ${u.xp}/${u.next}</div><div class="bar xp"><i style="width:${pct(u.xp,u.next)}%"></i></div>`:''}
+    ${u.poisoned?'<div class="muted">🟢 envenenado</div>':''}${u.stun?'<div class="muted">💫 atordoado</div>':''}</div>`;
+}
+
+function hub(){
+  const h = S.hero;
+  $(`<h1>🗺️ Mapa do Cerrado</h1>${statsCard(h)}
+    <div class="card">🎒 ${Object.entries(S.inv).map(([k,n])=>`${ITEMS[k].icon} ${ITEMS[k].name} ×${n}`).join(' · ')}</div>
+    <div class="grid">${ZONES.map(z=>`
+      <button onclick="explore('${z.id}')" ${h.lvl < z.lvl - 2 ? 'disabled' : ''}>
+        <div class="big">${z.icon}</div><b>${z.name}</b>${h.cleared[z.id]?' ✅':''}
+        <div class="muted">Nível sugerido: ${z.lvl}</div><div class="muted">${z.desc}</div>
+      </button>`).join('')}</div>
+    <div class="grid" style="margin-top:10px">
+      <button onclick="rest()">🌙 Descansar na toca (recupera tudo)</button>
+      <button onclick="if(confirm('Apagar progresso e recomeçar?')){try{localStorage.removeItem('cerrado-rpg')}catch(e){};title()}">↺ Novo jogo</button>
+    </div>
+    ${S.log.length?`<div class="card" id="log">${S.log.map(m=>`<p>${m}</p>`).join('')}</div>`:''}`);
+}
+
+function rest(){
+  const h=S.hero; h.hp=h.maxHp; h.en=h.maxEn; h.poisoned=0;
+  // ponytail: descanso grátis e ilimitado; adicionar custo se o jogo ficar fácil demais
+  log(`${h.name} descansou e está pronto para outra.`); save(); hub();
+}
+
+function explore(zid){
+  const z = ZONES.find(z=>z.id===zid);
+  const key = z.boss || z.foes[rnd(0, z.foes.length-1)];
+  const b = FOES[key], scale = z.boss ? 1 : 1 + 0.15*(z.lvl-1);
+  S.foe = { ...b, key, hp:Math.round(b.hp*scale), maxHp:Math.round(b.hp*scale),
+            atk:Math.round(b.atk*scale), xp:Math.round(b.xp*scale), zone:z.id };
+  S.log = [];
+  // chance de encontrar fruta em vez de briga
+  if (!z.boss && Math.random() < 0.2) {
+    const it = Math.random() < 0.15 ? 'buriti' : (Math.random() < 0.6 ? 'pequi' : 'baru');
+    S.inv[it]++; log(`Você encontrou ${ITEMS[it].icon} ${ITEMS[it].name}! Sem confusão desta vez.`); save(); return hub();
+  }
+  log(`Um(a) ${S.foe.name} apareceu em ${z.name}!`);
+  battle();
+}
+
+function battle(){
+  const h=S.hero, f=S.foe, over = h.hp<=0 || f.hp<=0;
+  $(`<h2>⚔️ Batalha</h2>
+    <div class="vs">${statsCard(h)}${statsCard(f)}</div>
+    <div class="card fact"><b>Você sabia?</b> ${f.fact}</div>
+    ${over ? '' : `<div class="grid">
+      <button onclick="turn('atk')">⚔️ Atacar</button>
+      <button onclick="turn('skill')" ${h.en<h.skill.cost?'disabled':''}>✨ ${h.skill.name} <span class="muted">(${h.skill.cost}⚡)</span></button>
+      <button onclick="turn('def')">🛡️ Defender <span class="muted">(+2⚡)</span></button>
+      ${Object.entries(S.inv).map(([k,n])=>`<button onclick="turn('item','${k}')" ${n?'':'disabled'}>${ITEMS[k].icon} ${ITEMS[k].name} ×${n}</button>`).join('')}
+      <button onclick="turn('run')" ${f.key==='queimada'?'disabled':''}>🏃 Fugir</button>
+    </div>`}
+    <div class="card" id="log">${S.log.map(m=>`<p>${m}</p>`).join('')}</div>`);
+}
+
+function turn(act, arg){
+  const h=S.hero, f=S.foe;
+  if (act==='run') {
+    if (Math.random() < 0.4 + (h.spd-f.spd)*0.05) { log(`${h.name} fugiu para o mato.`); save(); return hub(); }
+    log('Não conseguiu fugir!');
+  } else if (act==='atk') hit(h,f);
+  else if (act==='skill') { h.en-=h.skill.cost; log(`${h.name} usou ${h.skill.name}!`); h.skill.run(h,f); }
+  else if (act==='def') { h.guard=1; h.en=Math.min(h.maxEn,h.en+2); log(`${h.name} se defende.`); }
+  else if (act==='item') { S.inv[arg]--; ITEMS[arg].use(h); }
+
+  if (f.hp<=0) return win();
+  enemyTurn();
+  if (h.hp<=0) return lose();
+  battle();
+}
+
+function enemyTurn(){
+  const h=S.hero, f=S.foe;
+  if (f.stun) { f.stun=0; log(`${f.name} está atordoado e perde a vez.`); }
+  else {
+    hit(f,h);
+    if (f.poison && !h.poisoned && Math.random()<0.3) { h.poisoned=3; log(`${h.name} foi envenenado!`); }
+    if (f.burn && Math.random()<0.35) { const d=rnd(3,6); h.hp=Math.max(0,h.hp-d); log(`As chamas se espalham: ${d} de dano extra!`); }
+  }
+  if (h.poisoned) { h.hp=Math.max(0,h.hp-3); h.poisoned--; log(`O veneno causa 3 de dano.`); }
+}
+
+function win(){
+  const h=S.hero, f=S.foe;
+  log(`${f.name} foi derrotado!`);
+  if (f.key==='queimada') { h.cleared.chapada=true; save(); return ending(); }
+  h.xp += f.xp; log(`+${f.xp} XP.`);
+  if (Math.random()<0.4) { const it=Math.random()<0.5?'pequi':'baru'; S.inv[it]++; log(`Você achou ${ITEMS[it].icon} ${ITEMS[it].name}.`); }
+  while (h.xp >= h.next) {
+    h.xp -= h.next; h.lvl++; h.next = Math.round(h.next*1.6);
+    h.maxHp += 6; h.maxEn += 2; h.atk += 2; h.def += 1; h.spd += 1;
+    h.hp = h.maxHp; h.en = h.maxEn;
+    log(`⭐ Subiu para o nível ${h.lvl}! Vida e energia restauradas.`);
+  }
+  const z = ZONES.find(z=>z.id===f.zone); if (h.lvl >= z.lvl+1) h.cleared[z.id]=true;
+  h.guard=0; save(); hub();
+}
+
+function lose(){
+  const h=S.hero;
+  h.hp=Math.round(h.maxHp/2); h.en=h.maxEn; h.poisoned=0; h.xp=Math.floor(h.xp/2);
+  log(`${h.name} desmaiou e acordou na toca. Perdeu metade do XP atual.`); save(); hub();
+}
+
+function ending(){
+  $(`<h1>🌧️ O Cerrado está salvo!</h1>
+    <div class="card"><div class="big">${S.hero.icon}</div>
+    <p>A chuva chegou e ${S.hero.name} conteve a Grande Queimada. Os buritis, os ipês e todos os bichos podem respirar de novo.</p>
+    <p class="fact">${S.hero.fact}</p></div>
+    <button onclick="hub()">🗺️ Continuar explorando</button>
+    <button onclick="try{localStorage.removeItem('cerrado-rpg')}catch(e){};title()">↺ Jogar com outro animal</button>`);
+}
+
+title();
+</script>
+</body>
+</html>
